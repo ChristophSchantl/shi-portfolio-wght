@@ -60,10 +60,6 @@ def tail_ratio(returns):
         return np.nan
 
 def calculate_metrics(returns_dict, cumulative_dict):
-    """
-    Berechnet eine Reihe von Risikokennzahlen pro Asset.
-    Fehler bei einzelnen Assets werden geloggt und übersprungen.
-    """
     col_names = [
         'Total Return','Annual Return','Annual Volatility','Sharpe Ratio','Sortino Ratio',
         'Max Drawdown','Calmar Ratio','VaR (95%)','CVaR (95%)','Omega Ratio','Tail Ratio',
@@ -134,52 +130,37 @@ def plot_normalized_performance(cum_dict):
     st.pyplot(fig)
 
 def plot_individual_charts(price_dict, cum_dict):
-    """Erstellt für jedes Asset einen Chart mit Preisverlauf und Drawdown."""
     for name in price_dict:
-        price = price_dict[name]
-        cum = cum_dict[name]
-        # Drawdown berechnen
-        drawdown = cum / cum.cummax() - 1
-        # Als 1D-Serie sicherstellen
-        if isinstance(drawdown, pd.DataFrame):
-            drawdown = drawdown.iloc[:, 0]
-        drawdown = to_1d_series(drawdown)
-        # Index-Synchronisation
-        idx = price.index.intersection(drawdown.index)
-        price_final = price.loc[idx].dropna()
-        drawdown_final = drawdown.loc[idx].dropna()
-        # Prüfen auf ausreichende Länge
-        if len(price_final) < 2 or len(drawdown_final) < 2:
-            st.warning(f"Nicht genügend Daten für Einzelcharts von {name}, übersprungen.")
+        try:
+            price = to_1d_series(price_dict[name])
+            cum = cum_dict[name]
+            if isinstance(cum, pd.DataFrame): cum = cum.iloc[:,0]
+            drawdown = to_1d_series(cum / cum.cummax() - 1)
+            # Synchronisation
+            idx = price.index.intersection(drawdown.index)
+            price_final = price.loc[idx]
+            dd_final = drawdown.loc[idx]
+            if len(price_final)<2 or len(dd_final)<2:
+                st.warning(f"Nicht genügend Daten für {name}, übersprungen.")
+                continue
+            x = idx
+            y_price = price_final.values
+            y_dd = dd_final.values
+            zero_line = np.zeros_like(y_dd)
+            fig, axes = plt.subplots(2,1,figsize=(6,4),sharex=True)
+            axes[0].plot(x,y_price,label=name)
+            axes[0].set_title(f"{name} Preisverlauf")
+            axes[0].set_ylabel("Preis")
+            axes[1].fill_between(x,y_dd,zero_line,alpha=0.3)
+            axes[1].plot(x,y_dd,linewidth=0.8)
+            axes[1].set_title(f"{name} Drawdown")
+            axes[1].set_ylabel("Drawdown")
+            axes[1].set_xlabel("Datum")
+            plt.tight_layout()
+            st.pyplot(fig)
+        except Exception as e:
+            st.warning(f"Fehler im Einzelchart für {name}: {e}")
             continue
-        # Gemeinsamer Index nochmals sicherstellen
-        common_idx = price_final.index.intersection(drawdown_final.index)
-        if common_idx.empty:
-            st.warning(f"Kein gemeinsamer Index für {name}, übersprungen.")
-            continue
-        x = pd.to_datetime(common_idx)
-        y_price = price_final.loc[common_idx].values
-        y_dd = drawdown_final.loc[common_idx].values
-        # y_dd kann ggf. 2D sein => flach machen
-        if y_dd.ndim > 1:
-            y_dd = y_dd.flatten()
-        # Null-Linie als Array
-        zero_line = np.zeros_like(y_dd)
-
-        fig, axes = plt.subplots(2, 1, figsize=(6, 4), sharex=True)
-        # Preis-Chart
-        axes[0].plot(x, y_price, label=name)
-        axes[0].set_title(f"{name} Preisverlauf")
-        axes[0].set_ylabel("Preis")
-        # Drawdown-Chart
-        axes[1].fill_between(x, y_dd, zero_line, alpha=0.3)
-        axes[1].plot(x, y_dd, linewidth=0.8)
-        axes[1].set_title(f"{name} Drawdown")
-        axes[1].set_ylabel("Drawdown")
-        axes[1].set_xlabel("Datum")
-
-        plt.tight_layout()
-        st.pyplot(fig)
 
 # --- Zusätzliche Analysefunktionen ---
 def analyze_correlations(returns_dict):
@@ -291,7 +272,6 @@ def main():
             st.info("Bitte mindestens zwei Assets laden.")
         else:
             dfR = pd.DataFrame(returns_dict)
-            # Optimale Gewichtung
             def neg_sharpe(w):
                 ret = (dfR.mean()*w).sum()*252
                 vol = np.sqrt(w.T @ (dfR.cov()*252) @ w)
@@ -313,13 +293,14 @@ def main():
             cols[-1].number_input(assets[-1],min_value=0,max_value=100,value=rem,disabled=True)
             w_arr=np.array(sliders)/100
             st.markdown(f"**Summe:** {sum(sliders)}%")
-            # Composite
-            comp_ret=(dfR*w_arr).sum(axis=1)
+            comp_ret=(pd.DataFrame(returns_dict) * w_arr).sum(axis=1)
             comp_cum=(1+comp_ret).cumprod()
-            plot_overview_prices({**price_dict, 'Composite':comp_cum * price_dict[assets[0]].iloc[0]})
-            plot_normalized_performance({**cum_dict, 'Composite':comp_cum})
+            # Composite Charts
+            plot_overview_prices({**price_dict, 'Composite': comp_cum * price_dict[assets[0]].iloc[0]})
+            plot_normalized_performance({**cum_dict, 'Composite': comp_cum})
             st.subheader("Risikokennzahlen Composite")
-            m_comp=calculate_metrics({**returns_dict, 'Composite':comp_ret}, {**cum_dict, 'Composite':comp_cum})
+            m_comp=
+calculate_metrics({**returns_dict, 'Composite': comp_ret}, {**cum_dict, 'Composite': comp_cum})
             st.dataframe(m_comp, use_container_width=True)
 
 if __name__ == "__main__":
