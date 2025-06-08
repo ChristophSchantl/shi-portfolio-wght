@@ -245,66 +245,26 @@ def main():
 
 
     
+    # --- Sidebar: Zeitraum & Ticker ---
     with st.sidebar:
         st.header("Datenquellen auswählen")
         start = st.date_input("Startdatum", value=datetime(2023, 1, 1))
         end   = st.date_input("Enddatum",  value=datetime.today())
-        uploaded_files = st.file_uploader(
-            "Zusatzzertifikate/Strategien (CSV, Close-Spalte)", 
-            type="csv", accept_multiple_files=True)
     
-        st.markdown("**Yahoo Finance Ticker (mehrere durch Komma, Zeile, oder Semikolon getrennt):**")
-        # Kein vorinstallierter Wert mehr, stattdessen ein Hinweis-Text
-        tickers_input = st.text_area(
-            "Ticker",
-            value="", 
-            placeholder="z.B. AAPL, MSFT, GOOG"
-        )
+    # --- Feste Yahoo Finance-Ticker ---
+    tickers = ["QBTS", "VOW3.DE", "INTC", "BIDU", "EL", "TCEHY", "LUMN", "PNGAY", "PDD", "BABA"]
     
-        # Parsing wie gehabt
-        tickers = []
-        for line in tickers_input.splitlines():
-            tickers += [
-                t.strip()
-                for t in line.replace(";", ",").split(",")
-                if t.strip()
-            ]
-    
-        st.write("Verarbeitete Ticker:", tickers)
-
-
     # --- Daten laden ---
     returns_dict, cumulative_dict = {}, {}
-
-    # --- Autoload local CSVs ---
-    autoload_files = [
-        ("SHI_ALPHA_02JUN2025.csv", "SHI_ALPHA"),
-        ("SHI_INCOME_02JUN2025.csv", "SHI_INCOME")
-    ]
-    for filename, displayname in autoload_files:
-        try:
-            ret, cum = load_returns_from_csv(filename)
-            ret = ret.loc[(ret.index >= pd.Timestamp(start)) & (ret.index <= pd.Timestamp(end))]
-            cum = cum.loc[(cum.index >= pd.Timestamp(start)) & (cum.index <= pd.Timestamp(end))]
-            returns_dict[displayname] = ret
-            cumulative_dict[displayname] = cum
-        except Exception as e:
-            st.warning(f"Fehler beim Laden von {filename}: {e}")
-
-    # --- CSV-Uploads ---
-    if uploaded_files:
-        for file in uploaded_files:
-            name = file.name.replace('.csv', '')
-            try:
-                ret, cum = load_returns_from_csv(file)
-                ret = ret.loc[(ret.index >= pd.Timestamp(start)) & (ret.index <= pd.Timestamp(end))]
-                cum = cum.loc[(cum.index >= pd.Timestamp(start)) & (cum.index <= pd.Timestamp(end))]
-                returns_dict[name] = ret
-                cumulative_dict[name] = cum
-            except Exception as e:
-                st.warning(f"Fehler beim Laden von {file.name}: {e}")
-
-    # Yahoo Finance-Ticker
+    
+    def load_returns_from_yahoo(ticker, start, end):
+        df = yf.download(ticker, start=start, end=end)
+        df = df[["Close"]].dropna()
+        df["Return"] = df["Close"].pct_change()
+        df["Cumulative"] = (1 + df["Return"]).cumprod()
+        return df["Return"], df["Cumulative"]
+    
+    # --- Yahoo Finance-Daten abrufen ---
     for ticker in tickers:
         try:
             info = yf.Ticker(ticker).info
@@ -317,8 +277,8 @@ def main():
             cumulative_dict[display_name] = cum
         except Exception as e:
             st.warning(f"Fehler beim Laden von {ticker}: {e}")
-
-    # Synchronisiere Zeitachsen aller Serien
+    
+    # --- Zeitachsen synchronisieren ---
     if returns_dict:
         all_indexes = [set(r.index) for r in returns_dict.values() if len(r) > 0]
         if all_indexes:
