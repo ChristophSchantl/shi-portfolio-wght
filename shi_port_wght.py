@@ -44,28 +44,43 @@ def compute_metrics(returns: pd.Series, cumulative: pd.Series) -> dict:
     Calculates a suite of risk metrics for a single return series.
     """
     stats = {}
-    days = (cumulative.index[-1] - cumulative.index[0]).days
-    total_ret = cumulative.iloc[-1] / cumulative.iloc[0] - 1
+    # Ensure numeric types
+    r = to_1d_series(returns)
+    c = to_1d_series(cumulative)
+    if len(r) < 2 or len(c) < 2:
+        return stats
+    # Time delta
+    days = (c.index[-1] - c.index[0]).days
+    total_ret = float(c.iloc[-1] / c.iloc[0] - 1)
     stats['Total Return'] = total_ret
-    stats['Annual Return'] = (1 + total_ret)**(365 / days) - 1 if days > 0 else np.nan
-    stats['Annual Volatility'] = returns.std() * np.sqrt(252)
-    # Ratios
-    stats['Sharpe Ratio'] = ((stats['Annual Return'] - RISK_FREE_RATE) / stats['Annual Volatility']) if stats['Annual Volatility'] > 0 else np.nan
-    downside = returns[returns < 0]
-    stats['Sortino Ratio'] = ((returns.mean()) / downside.std(ddof=0) * np.sqrt(252)) if len(downside) > 0 else np.nan
-    drawdown = cumulative / cumulative.cummax() - 1
-    stats['Max Drawdown'] = drawdown.min()
-    stats['Calmar Ratio'] = (stats['Annual Return'] / abs(stats['Max Drawdown'])) if stats['Max Drawdown'] < 0 else np.nan
-    stats['VaR (95%)'] = returns.quantile(0.05)
-    stats['CVaR (95%)'] = returns[returns <= stats['VaR (95%)']].mean()
-    stats['Omega Ratio'] = returns[returns > 0].sum() / abs(returns[returns < 0].sum()) if (returns < 0).any() else np.nan
-    stats['Tail Ratio'] = np.percentile(returns, 95) / abs(np.percentile(returns, 5))
-    stats['Win Rate'] = (returns > 0).mean()
-    stats['Avg Win'] = returns[returns > 0].mean()
-    stats['Avg Loss'] = returns[returns < 0].mean()
-    stats['Profit Factor'] = (-stats['Avg Win'] / stats['Avg Loss']) if stats['Avg Loss'] < 0 else np.nan
-    monthly = returns.resample('M').apply(lambda x: (1 + x).prod() - 1)
-    stats['Positive Months'] = (monthly > 0).mean()
+    stats['Annual Return'] = float((1 + total_ret)**(365 / days) - 1) if days > 0 else np.nan
+    annual_vol = float(r.std() * np.sqrt(252))
+    stats['Annual Volatility'] = annual_vol
+    # Sharpe Ratio
+    stats['Sharpe Ratio'] = ((stats['Annual Return'] - RISK_FREE_RATE) / annual_vol) if annual_vol > 0 else np.nan
+    # Sortino Ratio
+    downside = r[r < 0]
+    std_down = float(downside.std(ddof=0)) if len(downside) > 0 else np.nan
+    stats['Sortino Ratio'] = ((r.mean() - RISK_FREE_RATE) / std_down * np.sqrt(252)) if std_down > 0 else np.nan
+    # Drawdowns
+    drawdown = c / c.cummax() - 1
+    stats['Max Drawdown'] = float(drawdown.min())
+    stats['Calmar Ratio'] = float(stats['Annual Return'] / abs(stats['Max Drawdown'])) if stats['Max Drawdown'] < 0 else np.nan
+    # Value at Risk
+    var95 = float(r.quantile(0.05))
+    stats['VaR (95%)'] = var95
+    stats['CVaR (95%)'] = float(r[r <= var95].mean())
+    # Omega & Tail
+    stats['Omega Ratio'] = float(omega_ratio(r))
+    stats['Tail Ratio'] = float(tail_ratio(r))
+    # Basic Win/Loss Stats
+    stats['Win Rate'] = float((r > 0).mean())
+    stats['Avg Win'] = float(r[r > 0].mean())
+    stats['Avg Loss'] = float(r[r < 0].mean())
+    stats['Profit Factor'] = float(-stats['Avg Win'] / stats['Avg Loss']) if stats['Avg Loss'] < 0 else np.nan
+    # Monthly
+    monthly = r.resample('M').apply(lambda x: (1 + x).prod() - 1)
+    stats['Positive Months'] = float((monthly > 0).mean())
     return stats
 
 # ---- Plotting ----
