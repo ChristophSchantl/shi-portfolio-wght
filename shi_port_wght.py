@@ -134,39 +134,46 @@ def plot_normalized_performance(cum_dict):
     st.pyplot(fig)
 
 def plot_individual_charts(price_dict, cum_dict):
+    """Erstellt für jedes Asset einen Chart mit Preisverlauf und Drawdown."""
     for name in price_dict:
         price = price_dict[name]
         cum = cum_dict[name]
         # Drawdown berechnen
         drawdown = cum / cum.cummax() - 1
-        # Indexe synchronisieren
+        # Als 1D-Serie sicherstellen
+        if isinstance(drawdown, pd.DataFrame):
+            drawdown = drawdown.iloc[:, 0]
+        drawdown = to_1d_series(drawdown)
+        # Index-Synchronisation
         idx = price.index.intersection(drawdown.index)
-        price_aligned = price.loc[idx].dropna()
-        drawdown_aligned = drawdown.loc[idx].dropna()
-        # Sicherstellen, dass wir Daten haben
-        if price_aligned.empty or drawdown_aligned.empty:
-            st.warning(f"Nicht genügend Daten für Einzelcharts {name}, übersprungen.")
+        price_final = price.loc[idx].dropna()
+        drawdown_final = drawdown.loc[idx].dropna()
+        # Prüfen auf ausreichende Länge
+        if len(price_final) < 2 or len(drawdown_final) < 2:
+            st.warning(f"Nicht genügend Daten für Einzelcharts von {name}, übersprungen.")
             continue
-        # Gemeinsamer Index
-        common_idx = price_aligned.index.intersection(drawdown_aligned.index)
-        price_final = price_aligned.loc[common_idx]
-        drawdown_final = drawdown_aligned.loc[common_idx]
-        if len(price_final) != len(drawdown_final):
-            st.warning(f"Datenlängen stimmen nicht überein für {name}, übersprungen.")
+        # Gemeinsamer Index nochmals sicherstellen
+        common_idx = price_final.index.intersection(drawdown_final.index)
+        if common_idx.empty:
+            st.warning(f"Kein gemeinsamer Index für {name}, übersprungen.")
             continue
-        # Plot
+        x = pd.to_datetime(common_idx)
+        y_price = price_final.loc[common_idx].values
+        y_dd = drawdown_final.loc[common_idx].values
+        # y_dd kann ggf. 2D sein => flach machen
+        if y_dd.ndim > 1:
+            y_dd = y_dd.flatten()
+        # Null-Linie als Array
+        zero_line = np.zeros_like(y_dd)
+
         fig, axes = plt.subplots(2, 1, figsize=(6, 4), sharex=True)
-        axes[0].plot(price_final.index, price_final.values, label=name)
+        # Preis-Chart
+        axes[0].plot(x, y_price, label=name)
         axes[0].set_title(f"{name} Preisverlauf")
         axes[0].set_ylabel("Preis")
-
-        axes[1].fill_between(
-            drawdown_final.index,
-            drawdown_final.values,
-            np.zeros_like(drawdown_final.values),
-            alpha=0.3
-        )
-        axes[1].plot(drawdown_final.index, drawdown_final.values, linewidth=0.8)
+        # Drawdown-Chart
+        axes[1].fill_between(x, y_dd, zero_line, alpha=0.3)
+        axes[1].plot(x, y_dd, linewidth=0.8)
         axes[1].set_title(f"{name} Drawdown")
         axes[1].set_ylabel("Drawdown")
         axes[1].set_xlabel("Datum")
