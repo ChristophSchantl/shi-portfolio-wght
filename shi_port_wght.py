@@ -245,31 +245,31 @@ def main():
 
     
     with st.sidebar:
-    st.header("Datenquellen auswählen")
-    start = st.date_input("Startdatum", value=datetime(2023, 1, 1))
-    end   = st.date_input("Enddatum",  value=datetime.today())
-    uploaded_files = st.file_uploader(
-        "Zusatzzertifikate/Strategien (CSV, Close-Spalte)", 
-        type="csv", accept_multiple_files=True
-    )
-
-    st.markdown("**Yahoo Finance Ticker (mehrere durch Komma, Zeile, oder Semikolon getrennt):**")
-    tickers_input = st.text_area(
-        "Ticker",
-        value="", 
-        placeholder="z.B. AAPL, MSFT, GOOG"
-    )
-
-    # Parsing wie gehabt
-    tickers = []
-    for line in tickers_input.splitlines():
-        tickers += [
-            t.strip()
-            for t in line.replace(";", ",").split(",")
-            if t.strip()
-        ]
-
-    st.write("Verarbeitete Ticker:", tickers)
+        st.header("Datenquellen auswählen")
+        start = st.date_input("Startdatum", value=datetime(2023, 1, 1))
+        end   = st.date_input("Enddatum",  value=datetime.today())
+        uploaded_files = st.file_uploader(
+            "Zusatzzertifikate/Strategien (CSV, Close-Spalte)", 
+            type="csv", accept_multiple_files=True
+        )
+    
+        st.markdown("**Yahoo Finance Ticker (mehrere durch Komma, Zeile, oder Semikolon getrennt):**")
+        tickers_input = st.text_area(
+            "Ticker",
+            value="", 
+            placeholder="z.B. AAPL, MSFT, GOOG"
+        )
+    
+        # Parsing wie gehabt
+        tickers = []
+        for line in tickers_input.splitlines():
+            tickers += [
+                t.strip()
+                for t in line.replace(";", ",").split(",")
+                if t.strip()
+            ]
+    
+        st.write("Verarbeitete Ticker:", tickers)
 
     # --- Daten laden ---
     returns_dict, cumulative_dict = {}, {}
