@@ -23,7 +23,6 @@ st.set_page_config(
 )
 
 
-
 RISK_FREE_RATE = 0.02  # 2% p.a.
 
 # --- Hilfsfunktionen ---
@@ -32,16 +31,18 @@ def to_1d_series(ret):
         ret = ret.iloc[:, 0]
     return pd.to_numeric(ret, errors='coerce').dropna()
 
+def load_returns_from_csv(file):
+    df = pd.read_csv(file, index_col=0, parse_dates=True)
+    close = pd.to_numeric(df['Close'], errors='coerce').ffill().dropna()
+    returns = close.pct_change().dropna()
+    cumulative = (1 + returns).cumprod()
+    return returns, cumulative
 
 def load_returns_from_yahoo(ticker, start, end):
-    df = yf.download(ticker, start=start, end=end)
-    if df.empty or "Close" not in df.columns:
-        raise ValueError("Keine gültigen Daten für Ticker")
-
-    df = df[["Close"]].dropna()
-    df["Return"] = df["Close"].pct_change()
-    df["Cumulative"] = (1 + df["Return"]).cumprod()
-    return df["Return"].dropna(), df["Cumulative"].dropna()
+    df = yf.download(ticker, start=start, end=end+timedelta(days=1), progress=False)['Close'].dropna()
+    returns = df.pct_change().dropna()
+    cumulative = (1 + returns).cumprod()
+    return returns, cumulative
 
 def sortino_ratio(returns, risk_free=0.0, annualization=252):
     downside = returns[returns < risk_free]
@@ -243,45 +244,50 @@ def main():
 
 
     
-    # --- Sidebar: Zeitraum & Ticker-Auswahl ---
     with st.sidebar:
-        st.header("Datenquellen auswählen")
-        start = st.date_input("Startdatum", value=datetime(2023, 1, 1))
-        end = st.date_input("Enddatum", value=datetime.today())
-    
-        # Standard-Ticker
-        default_tickers = ["QBTS", "VOW3.DE", "INTC", "BIDU", "EL", "TCEHY", "LUMN", "PNGAY", "PDD", "BABA"]
-    
-        st.markdown("**Zusätzliche Yahoo Finance Ticker eingeben (durch Komma, Zeile oder Semikolon getrennt):**")
-        tickers_input = st.text_area(
-            "Zusätzliche Ticker",
-            value="",
-            placeholder="z.B. AAPL, MSFT, GOOG"
-        )
-    
-        additional_tickers = []
-        for line in tickers_input.splitlines():
-            additional_tickers += [
-                t.strip()
-                for t in line.replace(";", ",").split(",")
-                if t.strip()
-            ]
-    
-        # Finaler Ticker-Set: Standard + Eingaben
-        tickers = list(set(default_tickers + additional_tickers))
-        st.write("Verarbeitete Ticker:", tickers)
-    
-    # --- Hilfsfunktion zum Laden von Yahoo-Daten ---
-    def load_returns_from_yahoo(ticker, start, end):
-        df = yf.download(ticker, start=start, end=end)
-        df = df[["Close"]].dropna()
-        df["Return"] = df["Close"].pct_change()
-        df["Cumulative"] = (1 + df["Return"]).cumprod()
-        return df["Return"], df["Cumulative"]
-    
-    # --- Daten sammeln ---
+    st.header("Datenquellen auswählen")
+    start = st.date_input("Startdatum", value=datetime(2023, 1, 1))
+    end   = st.date_input("Enddatum",  value=datetime.today())
+    uploaded_files = st.file_uploader(
+        "Zusatzzertifikate/Strategien (CSV, Close-Spalte)", 
+        type="csv", accept_multiple_files=True
+    )
+
+    st.markdown("**Yahoo Finance Ticker (mehrere durch Komma, Zeile, oder Semikolon getrennt):**")
+    tickers_input = st.text_area(
+        "Ticker",
+        value="", 
+        placeholder="z.B. AAPL, MSFT, GOOG"
+    )
+
+    # Parsing wie gehabt
+    tickers = []
+    for line in tickers_input.splitlines():
+        tickers += [
+            t.strip()
+            for t in line.replace(";", ",").split(",")
+            if t.strip()
+        ]
+
+    st.write("Verarbeitete Ticker:", tickers)
+
+    # --- Daten laden ---
     returns_dict, cumulative_dict = {}, {}
     
+    # --- CSV-Uploads (inkl. ehemals autoload-Dateien) ---
+    if uploaded_files:
+        for file in uploaded_files:
+            name = file.name.replace('.csv', '')
+            try:
+                ret, cum = load_returns_from_csv(file)
+                ret = ret.loc[(ret.index >= pd.Timestamp(start)) & (ret.index <= pd.Timestamp(end))]
+                cum = cum.loc[(cum.index >= pd.Timestamp(start)) & (cum.index <= pd.Timestamp(end))]
+                returns_dict[name] = ret
+                cumulative_dict[name] = cum
+            except Exception as e:
+                st.warning(f"Fehler beim Laden von {file.name}: {e}")
+    
+    # --- Yahoo Finance Ticker ---
     for ticker in tickers:
         try:
             info = yf.Ticker(ticker).info
@@ -295,14 +301,17 @@ def main():
         except Exception as e:
             st.warning(f"Fehler beim Laden von {ticker}: {e}")
     
-    # --- Zeitachsen synchronisieren ---
+    # --- Synchronisiere Zeitachsen aller Serien ---
     if returns_dict:
         all_indexes = [set(r.index) for r in returns_dict.values() if len(r) > 0]
         if all_indexes:
             common_index = sorted(set.intersection(*all_indexes))
-            for name in returns_dict:
-                returns_dict[name] = returns_dict[name].loc[common_index]
-                cumulative_dict[name] = cumulative_dict[name].loc[common_index]
+        else:
+            common_index = []
+        for name in returns_dict:
+            returns_dict[name] = returns_dict[name].loc[common_index]
+            cumulative_dict[name] = cumulative_dict[name].loc[common_index]
+
 
     # --- Tabs ---
     tabs = st.tabs([
@@ -606,13 +615,7 @@ def main():
 
 
 
-
-
-
-
-
-
-
-
 if __name__ == "__main__":
     main()
+
+
