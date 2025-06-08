@@ -194,11 +194,30 @@ def main():
     with tabs[0]: st.dataframe(calculate_metrics(returns, cums))
     with tabs[1]: plot_overview_prices(prices); plot_normalized_performance(cums); plot_individual_charts(prices,cums)
     with tabs[2]: analyze_rolling_performance(returns); analyze_correlations(returns)
-    with tabs[3]:    
-        mth = pd.DataFrame({t: to_1d_series(r).resample('M').apply(lambda x:(1+x).prod()-1) for t,r in returns.items()})
-        if mth.empty: st.warning("keine Daten");
+        with tabs[3]:
+        st.subheader("Monatliche Renditen")
+        mth = pd.DataFrame({
+            t: to_1d_series(r).resample('M').apply(lambda x:(1+x).prod()-1)
+            for t,r in returns.items()
+        })
+        if mth.empty:
+            st.warning("keine Daten")
         else:
-            fig, ax = plt.subplots(figsize=(7,4)); sns.heatmap(mth.T, annot=True, fmt='-.1%', cmap='RdYlGn', center=0, linewidths=0.5, annot_kws={'size':4}, ax=ax); ax.set_xticklabels([d.strftime('%Y-%m') for d in mth.index], rotation=90, fontsize=4); plt.tight_layout(); st.pyplot(fig)
+            fig, ax = plt.subplots(figsize=(7,4))
+            sns.heatmap(
+                mth.T,
+                annot=True,
+                fmt='-.1%',
+                cmap='RdYlGn',
+                center=0,
+                linewidths=0.5,
+                annot_kws={'size':4},
+                ax=ax
+            )
+            # Ticks rotieren und Schriftgröße anpassen
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=90, fontsize=4)
+            plt.tight_layout()
+            st.pyplot(fig)
     with tabs[4]:
         dfR = pd.DataFrame(returns)
         def neg_sh(w): ret=(dfR.mean()*w).sum()*252; vol=np.sqrt(w.T@(dfR.cov()*252)@w); return -(ret-RISK_FREE_RATE)/vol if vol>0 else np.nan
