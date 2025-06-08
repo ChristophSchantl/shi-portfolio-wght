@@ -24,34 +24,32 @@ st.set_page_config(
 RISK_FREE_RATE = 0.02  # 2% p.a.
 
 # --- Hilfsfunktionen ---
-def to_1d_series(ret):
-    if isinstance(ret, pd.DataFrame):
-        ret = ret.iloc[:, 0]
-    return pd.to_numeric(ret, errors='coerce').dropna()
+def to_1d_series(series):
+    if isinstance(series, pd.DataFrame):
+        series = series.iloc[:, 0]
+    return pd.to_numeric(series, errors='coerce').dropna()
 
 
 def load_data_from_yahoo(ticker, start, end):
-    price = yf.download(ticker, start=start, end=end + timedelta(days=1), progress=False)["Close"].dropna()
-    returns = price.pct_change().dropna()
+    df = yf.download(ticker, start=start, end=end + timedelta(days=1), progress=False)["Close"].dropna()
+    prices = df.copy()
+    returns = prices.pct_change().dropna()
     cumulative = (1 + returns).cumprod()
-    return price, returns, cumulative
+    return prices, returns, cumulative
 
 # --- Risiko-Kennzahlen ---
 def sortino_ratio(returns, risk_free=0.0, annualization=252):
     downside = returns[returns < risk_free]
-    downside_std = downside.std(ddof=0)
+    std_down = downside.std(ddof=0)
     mean_ret = returns.mean()
-    if downside_std == 0 or np.isnan(downside_std):
+    if std_down == 0 or np.isnan(std_down):
         return np.nan
-    daily_sortino = (mean_ret - risk_free) / downside_std
-    return daily_sortino * np.sqrt(annualization)
+    return (mean_ret - risk_free) / std_down * np.sqrt(annualization)
 
 def omega_ratio(returns, risk_free=0.0):
-    gain = (returns > risk_free).sum()
-    loss = (returns <= risk_free).sum()
-    if loss == 0:
-        return np.nan
-    return gain / loss
+    gains = (returns > risk_free).sum()
+    losses = (returns <= risk_free).sum()
+    return np.nan if losses == 0 else gains / losses
 
 def tail_ratio(returns):
     try:
@@ -59,249 +57,162 @@ def tail_ratio(returns):
     except Exception:
         return np.nan
 
-def calculate_metrics(returns_dict, cumulative_dict):
-    col_names = [
+
+def calculate_metrics(returns_dict, cum_dict):
+    cols = [
         'Total Return','Annual Return','Annual Volatility','Sharpe Ratio','Sortino Ratio',
         'Max Drawdown','Calmar Ratio','VaR (95%)','CVaR (95%)','Omega Ratio','Tail Ratio',
         'Win Rate','Avg Win','Avg Loss','Profit Factor','Positive Months'
     ]
-    metrics = pd.DataFrame(columns=col_names)
-    for name in returns_dict:
+    metrics = pd.DataFrame(columns=cols)
+    for name, ret in returns_dict.items():
         try:
-            ret = to_1d_series(returns_dict[name])
-            cum = cumulative_dict[name]
-            if isinstance(cum, pd.DataFrame):
-                cum = cum.iloc[:, 0]
-            cum = pd.to_numeric(cum, errors='coerce').dropna()
-            if ret.empty or cum.empty:
-                st.warning(f"Kein gültiger Datensatz für {name}, übersprungen.")
+            r = to_1d_series(ret)
+            cum = cum_dict[name]
+            if isinstance(cum, pd.DataFrame): cum = cum.iloc[:,0]
+            cum = to_1d_series(cum)
+            if r.empty or cum.empty:
+                st.warning(f"{name}: keine Daten für Kennzahlen.")
                 continue
             days = (cum.index[-1] - cum.index[0]).days
-            total_ret = cum.iloc[-1] / cum.iloc[0] - 1
-            annual_ret = (1 + total_ret)**(365/days) - 1 if days > 0 else np.nan
-            annual_vol = ret.std() * np.sqrt(252)
-            sharpe = (annual_ret - RISK_FREE_RATE) / annual_vol if annual_vol > 0 else np.nan
-            sortino = sortino_ratio(ret)
-            drawdowns = cum / cum.cummax() - 1
-            mdd = drawdowns.min() if not drawdowns.empty else np.nan
-            calmar = (annual_ret / abs(mdd)) if (pd.api.types.is_scalar(mdd) and mdd < 0) else np.nan
-            var_95 = ret.quantile(0.05)
-            cvar_95 = ret[ret <= var_95].mean()
-            omega = omega_ratio(ret)
-            tail = tail_ratio(ret)
-            win_rate = (ret > 0).mean()
-            avg_win = ret[ret > 0].mean()
-            avg_loss = ret[ret < 0].mean()
-            profit_factor = -avg_win / avg_loss if avg_loss < 0 else np.nan
-            monthly_ret = ret.resample('M').apply(lambda x: (1 + x).prod() - 1)
-            positive_months = (monthly_ret > 0).mean()
+            total = cum.iloc[-1] / cum.iloc[0] - 1
+            ann_ret = (1+total)**(365/days) -1 if days>0 else np.nan
+            ann_vol = r.std()*np.sqrt(252)
+            sharpe = (ann_ret - RISK_FREE_RATE)/ann_vol if ann_vol>0 else np.nan
+            sortino = sortino_ratio(r)
+            dd = cum/cum.cummax() -1
+            mdd = dd.min()
+            calmar = ann_ret/abs(mdd) if mdd<0 else np.nan
+            var95 = r.quantile(0.05)
+            cvar95 = r[r<=var95].mean()
+            omega = omega_ratio(r)
+            tail = tail_ratio(r)
+            win = (r>0).mean()
+            avg_win = r[r>0].mean()
+            avg_loss = r[r<0].mean()
+            pf = -avg_win/avg_loss if avg_loss<0 else np.nan
+            m_ret = r.resample('M').apply(lambda x: (1+x).prod()-1)
+            pos_months = (m_ret>0).mean()
             metrics.loc[name] = [
-                total_ret, annual_ret, annual_vol, sharpe, sortino,
-                mdd, calmar, var_95, cvar_95, omega, tail,
-                win_rate, avg_win, avg_loss, profit_factor,
-                positive_months
+                total, ann_ret, ann_vol, sharpe, sortino,
+                mdd, calmar, var95, cvar95, omega, tail,
+                win, avg_win, avg_loss, pf, pos_months
             ]
         except Exception as e:
-            st.warning(f"Fehler bei Kennzahlen für {name}: {e}")
+            st.warning(f"Kennzahlen {name} fehlgeschlagen: {e}")
             continue
     return metrics
 
-# --- Plotfunktionen für Performance & Drawdowns ---
-def plot_overview_prices(price_dict):
-    fig, ax = plt.subplots(figsize=(8, 4))
-    for name, price in price_dict.items():
+# --- Plotfunktionen ---
+def plot_overview_prices(prices):
+    fig, ax = plt.subplots(figsize=(8,4))
+    for name, price in prices.items():
         ax.plot(price.index, price, label=name, linewidth=0.8)
-    ax.set_title("Schlusskurs-Übersicht aller Assets")
-    ax.set_xlabel("Datum")
-    ax.set_ylabel("Preis")
-    ax.legend(loc='upper left', fontsize=8)
-    plt.tight_layout()
-    st.pyplot(fig)
+    ax.set(title="Preis-Übersicht aller Assets", xlabel="Datum", ylabel="Preis")
+    ax.legend(fontsize=8)
+    plt.tight_layout(); st.pyplot(fig)
 
-def plot_normalized_performance(cum_dict):
-    fig, ax = plt.subplots(figsize=(8, 4))
-    for name, cum in cum_dict.items():
+
+def plot_normalized_performance(cums):
+    fig, ax = plt.subplots(figsize=(8,4))
+    for name, cum in cums.items():
         ax.plot(cum.index, cum/cum.iloc[0], label=name, linewidth=0.8)
-    ax.set_title("Normierte kumulative Performance (Start = 1)")
-    ax.set_xlabel("Datum")
-    ax.set_ylabel("Indexierte Entwicklung")
-    ax.legend(loc='upper left', fontsize=8)
-    plt.tight_layout()
-    st.pyplot(fig)
+    ax.set(title="Normierte Performance (Start=1)", xlabel="Datum", ylabel="Index")
+    ax.legend(fontsize=8)
+    plt.tight_layout(); st.pyplot(fig)
 
-def plot_individual_charts(price_dict, cum_dict):
-    for name in price_dict:
+
+def plot_individual_charts(prices, cums):
+    for name in prices:
         try:
-            price = to_1d_series(price_dict[name])
-            cum = cum_dict[name]
+            price = to_1d_series(prices[name])
+            cum = cums[name]
             if isinstance(cum, pd.DataFrame): cum = cum.iloc[:,0]
-            drawdown = to_1d_series(cum / cum.cummax() - 1)
-            # Synchronisation
-            idx = price.index.intersection(drawdown.index)
-            price_final = price.loc[idx]
-            dd_final = drawdown.loc[idx]
-            if len(price_final)<2 or len(dd_final)<2:
-                st.warning(f"Nicht genügend Daten für {name}, übersprungen.")
+            cum = to_1d_series(cum)
+            dd = cum/cum.cummax() -1
+            # align
+            idx = price.index.intersection(dd.index)
+            p = price.loc[idx]
+            d = dd.loc[idx]
+            if len(p)<2 or len(d)<2:
+                st.warning(f"Einzelchart {name}: nicht genügend Daten.")
                 continue
             x = idx
-            y_price = price_final.values
-            y_dd = dd_final.values
-            zero_line = np.zeros_like(y_dd)
-            fig, axes = plt.subplots(2,1,figsize=(6,4),sharex=True)
-            axes[0].plot(x,y_price,label=name)
-            axes[0].set_title(f"{name} Preisverlauf")
-            axes[0].set_ylabel("Preis")
-            axes[1].fill_between(x,y_dd,zero_line,alpha=0.3)
-            axes[1].plot(x,y_dd,linewidth=0.8)
-            axes[1].set_title(f"{name} Drawdown")
-            axes[1].set_ylabel("Drawdown")
-            axes[1].set_xlabel("Datum")
-            plt.tight_layout()
-            st.pyplot(fig)
+            y1 = p.values
+            y2 = d.values.flatten()
+            zero = np.zeros_like(y2)
+            fig, ax = plt.subplots(2,1,figsize=(6,4),sharex=True)
+            ax[0].plot(x,y1); ax[0].set(title=f"{name} Preis", ylabel="Preis")
+            ax[1].fill_between(x,y2,zero,alpha=0.3); ax[1].plot(x,y2,linewidth=0.8)
+            ax[1].set(title=f"{name} Drawdown", ylabel="Drawdown", xlabel="Datum")
+            plt.tight_layout(); st.pyplot(fig)
         except Exception as e:
-            st.warning(f"Fehler im Einzelchart für {name}: {e}")
+            st.warning(f"Einzelchart Fehler {name}: {e}")
             continue
 
-# --- Zusätzliche Analysefunktionen ---
-def analyze_correlations(returns_dict):
-    returns_clean = {name: to_1d_series(ret) for name, ret in returns_dict.items()}
-    df = pd.DataFrame(returns_clean)
-    corr = df.corr()
-    fig, ax = plt.subplots(figsize=(6,3))
-    sns.heatmap(corr, annot=True, fmt=".2f", cmap='coolwarm', center=0,
-                linewidths=0.5, annot_kws={"size":5}, ax=ax)
-    ax.set_title("Korrelationsmatrix der täglichen Renditen", fontsize=8)
-    plt.tight_layout()
-    st.pyplot(fig)
+# --- Korrelations- & Rolling-Sharpe ---
+def analyze_correlations(returns):
+    df = pd.DataFrame({n: to_1d_series(r) for n,r in returns.items()})
+    corr = df.corr(); fig, ax = plt.subplots(figsize=(6,3))
+    sns.heatmap(corr, annot=True, fmt='.2f', cmap='coolwarm', center=0, linewidths=0.5, annot_kws={'size':5}, ax=ax)
+    ax.set_title("Korrelationsmatrix" ,fontsize=8); plt.tight_layout(); st.pyplot(fig)
     return corr
 
 
-def analyze_rolling_performance(returns_dict, window=126):
-    df = pd.DataFrame({name: to_1d_series(ret) for name, ret in returns_dict.items()})
-    rolling_sharpe = (df.rolling(window).mean()*252 - RISK_FREE_RATE) / (df.rolling(window).std()*np.sqrt(252))
+def analyze_rolling_performance(returns, window=126):
+    df = pd.DataFrame({n: to_1d_series(r) for n,r in returns.items()})
+    roll_mean = df.rolling(window).mean()*252
+    roll_std = df.rolling(window).std()*np.sqrt(252)
+    roll_sh = (roll_mean - RISK_FREE_RATE)/roll_std
     fig, ax = plt.subplots(figsize=(6,3))
-    for col in rolling_sharpe:
-        ax.plot(rolling_sharpe.index, rolling_sharpe[col], linewidth=0.8)
-    ax.set_title(f"Rollierender Sharpe Ratio ({window}-Tage)", fontsize=8)
-    ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
-    plt.tight_layout()
-    st.pyplot(fig)
-    return rolling_sharpe
+    for col in roll_sh: ax.plot(roll_sh.index, roll_sh[col], linewidth=0.8)
+    ax.set(title=f"Rollierender Sharpe ({window}-Tage)"); ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
+    plt.tight_layout(); st.pyplot(fig)
+    return roll_sh
 
 # --- Streamlit App ---
 def main():
-    st.markdown('<h3 style="font-weight:400; margin-bottom:0.2rem;">📊 SHI Zertifikate im Vergleich</h3>', unsafe_allow_html=True)
-    st.caption("Performance-, Risiko- und Benchmarkanalyse auf Monatsbasis")
-
+    st.markdown('<h3 style="font-weight:400;">📊 SHI Zertifikate im Vergleich</h3>', unsafe_allow_html=True)
+    st.caption("Performance-, Risiko- und Benchmarkanalyse")
     with st.sidebar:
-        st.header("Datenquellen auswählen")
-        start = st.date_input("Startdatum", value=datetime(2023,1,1))
-        end   = st.date_input("Enddatum", value=datetime.today())
-        tickers_input = st.text_area(
-            "Yahoo Finance Ticker (kommagetrennt)",
-            placeholder="z.B. AAPL, MSFT, GOOG"
-        )
-        tickers = [t.strip() for t in tickers_input.replace(';',',').split(',') if t.strip()]
-        st.write("Ausgewählte Ticker:", tickers)
-
-    price_dict, returns_dict, cum_dict = {}, {}, {}
-    for ticker in tickers:
-        try:
-            price, ret, cum = load_data_from_yahoo(ticker, start, end)
-            price_dict[ticker] = price
-            returns_dict[ticker] = ret
-            cum_dict[ticker] = cum
-        except Exception as e:
-            st.warning(f"Fehler beim Laden von {ticker}: {e}")
-
-    if not price_dict:
-        st.warning("Bitte mindestens einen Ticker eingeben.")
-        return
-
-    # Zeitachsen synchronisieren
-    common_idx = sorted(set.intersection(*[set(r.index) for r in returns_dict.values()]))
-    for k in returns_dict:
-        returns_dict[k] = returns_dict[k].loc[common_idx]
-        cum_dict[k]     = cum_dict[k].loc[common_idx]
-
-    tabs = st.tabs([
-        "🚦 Metriken", "📈 Performance & Drawdown",
-        "📉 Sharpe & Korrelation", "📊 Monatsrenditen", "🔀 Composite Index"
-    ])
-
-    with tabs[0]:
-        st.subheader("Erweiterte Risikokennzahlen")
-        metrics = calculate_metrics(returns_dict, cum_dict)
-        st.dataframe(metrics, use_container_width=True)
-
-    with tabs[1]:
-        st.subheader("Kumulative Performance & Drawdown")
-        plot_overview_prices(price_dict)
-        plot_normalized_performance(cum_dict)
-        plot_individual_charts(price_dict, cum_dict)
-
-    with tabs[2]:
-        st.subheader("Rollierender Sharpe Ratio")
-        analyze_rolling_performance(returns_dict)
-        st.subheader("Korrelation der Tagesrenditen")
-        analyze_correlations(returns_dict)
-
-    with tabs[3]:
-        st.subheader("Monatliche Renditen")
-        monthly = pd.DataFrame({
-            name: to_1d_series(ret).resample('M').apply(lambda x: (1+x).prod()-1)
-            for name, ret in returns_dict.items()
-        })
-        if not monthly.empty:
-            fig, ax = plt.subplots(figsize=(7, max(2.2, len(monthly.columns)*0.33)))
-            sns.heatmap(
-                monthly.T, annot=True, fmt='-.1%', cmap='RdYlGn', center=0,
-                linewidths=0.5, ax=ax, annot_kws={"size":4}
-            )
-            ax.set_title("Monatliche Renditen", fontsize=8)
-            ax.set_xticklabels([d.strftime('%Y-%m') for d in monthly.index], rotation=90, fontsize=4)
-            plt.tight_layout()
-            st.pyplot(fig)
+        st.header("Einstellungen")
+        start = st.date_input("Startdatum", datetime(2023,1,1))
+        end = st.date_input("Enddatum", datetime.today())
+        tickers = [t.strip() for t in st.text_area("Ticker (kommagetrennt)", placeholder="AAPL, MSFT").replace(';',',').split(',') if t.strip()]
+    data = {}
+    for t in tickers:
+        try: data[t] = load_data_from_yahoo(t, start, end)
+        except Exception as e: st.warning(f"{t} Ladefehler: {e}")
+    if not data: st.warning("Keine Ticker"); return
+    prices = {t: v[0] for t,v in data.items()}
+    returns = {t: v[1] for t,v in data.items()}
+    cums = {t: v[2] for t,v in data.items()}
+    # syncronize indices
+    common = sorted(set.intersection(*[set(r.index) for r in returns.values()]))
+    for t in returns: returns[t] = returns[t].loc[common]; cums[t] = cums[t].loc[common]
+    tabs = st.tabs(["Metriken","Performance","Sharpe/Korrelation","Monatsrenditen","Composite"])
+    with tabs[0]: st.dataframe(calculate_metrics(returns, cums))
+    with tabs[1]: plot_overview_prices(prices); plot_normalized_performance(cums); plot_individual_charts(prices,cums)
+    with tabs[2]: analyze_rolling_performance(returns); analyze_correlations(returns)
+    with tabs[3]:    
+        mth = pd.DataFrame({t: to_1d_series(r).resample('M').apply(lambda x:(1+x).prod()-1) for t,r in returns.items()})
+        if mth.empty: st.warning("keine Daten");
         else:
-            st.warning("Keine Monatsrenditen verfügbar.")
-
+            fig, ax = plt.subplots(figsize=(7,4)); sns.heatmap(mth.T, annot=True, fmt='-.1%', cmap='RdYlGn', center=0, linewidths=0.5, annot_kws={'size':4}, ax=ax); ax.set_xticklabels([d.strftime('%Y-%m') for d in mth.index], rotation=90, fontsize=4); plt.tight_layout(); st.pyplot(fig)
     with tabs[4]:
-        st.subheader("🔀 Composite Index aus gewählten Assets")
-        assets = list(returns_dict.keys())
-        if len(assets)<2:
-            st.info("Bitte mindestens zwei Assets laden.")
-        else:
-            dfR = pd.DataFrame(returns_dict)
-            def neg_sharpe(w):
-                ret = (dfR.mean()*w).sum()*252
-                vol = np.sqrt(w.T @ (dfR.cov()*252) @ w)
-                return -((ret-RISK_FREE_RATE)/vol if vol>0 else 0)
-            cons = ({'type':'eq','fun':lambda x: x.sum()-1})
-            bnds=[(0,1)]*len(assets)
-            x0=np.ones(len(assets))/len(assets)
-            res=opt.minimize(neg_sharpe, x0, method='SLSQP', bounds=bnds, constraints=cons)
-            weights = res.x if res.success else x0
-            sliders=[]
-            cols=st.columns(len(assets))
-            rem=100
-            for i,a in enumerate(assets[:-1]):
-                val=st.session_state.get(f'w_{a}', int(weights[i]*100))
-                s=cols[i].slider(a,0,rem,val,1,key=f'w_{a}')
-                sliders.append(s)
-                rem-=s
-            sliders.append(rem)
-            cols[-1].number_input(assets[-1],min_value=0,max_value=100,value=rem,disabled=True)
-            w_arr=np.array(sliders)/100
-            st.markdown(f"**Summe:** {sum(sliders)}%")
-            comp_ret=(pd.DataFrame(returns_dict) * w_arr).sum(axis=1)
-            comp_cum=(1+comp_ret).cumprod()
-            # Composite Charts
-            plot_overview_prices({**price_dict, 'Composite': comp_cum * price_dict[assets[0]].iloc[0]})
-            plot_normalized_performance({**cum_dict, 'Composite': comp_cum})
-            st.subheader("Risikokennzahlen Composite")
-            m_comp=
-calculate_metrics({**returns_dict, 'Composite': comp_ret}, {**cum_dict, 'Composite': comp_cum})
-            st.dataframe(m_comp, use_container_width=True)
+        dfR = pd.DataFrame(returns)
+        def neg_sh(w): ret=(dfR.mean()*w).sum()*252; vol=np.sqrt(w.T@(dfR.cov()*252)@w); return -(ret-RISK_FREE_RATE)/vol if vol>0 else np.nan
+        cons=({'type':'eq','fun':lambda w:w.sum()-1},); bnds=[(0,1)]*len(dfR.columns); x0=np.repeat(1/len(dfR.columns),len(dfR.columns))
+        sol=opt.minimize(neg_sh,x0,method='SLSQP',bounds=bnds,constraints=cons)
+        w=sol.x if sol.success else x0
+        cols=st.columns(len(w))
+        rem=100; ws=[]
+        for i,(asset,wi) in enumerate(zip(dfR.columns,w)):
+            if i<len(w)-1: val=cols[i].slider(asset,0,rem,int(wi*100),1,key=f'w{i}'); ws.append(val); rem-=val
+            else: cols[i].number_input(asset,min_value=0,max_value=100,value=rem,disabled=True); ws.append(rem)
+        w_arr=np.array(ws)/100; st.write(f"Summe: {sum(ws)}%")
+        cret=(dfR*w_arr).sum(axis=1); ccum=(1+cret).cumprod()
+        plot_overview_prices({**prices,'Composite':ccum*prices[dfR.columns[0]].iloc[0]}); plot_normalized_performance({**cums,'Composite':ccum})
+        st.dataframe(calculate_metrics({**returns,'Composite':cret},{**cums,'Composite':ccum}))
 
-if __name__ == "__main__":
-    main()
+if __name__=="__main__": main()
