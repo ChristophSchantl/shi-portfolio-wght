@@ -29,7 +29,6 @@ def to_1d_series(series):
         series = series.iloc[:, 0]
     return pd.to_numeric(series, errors='coerce').dropna()
 
-
 def load_data_from_yahoo(ticker, start, end):
     prices = yf.download(ticker, start=start, end=end + timedelta(days=1), progress=False)["Close"].dropna()
     returns = prices.pct_change().dropna()
@@ -55,7 +54,6 @@ def tail_ratio(returns):
         return np.percentile(returns, 95) / abs(np.percentile(returns, 5))
     except Exception:
         return np.nan
-
 
 def calculate_metrics(returns_dict, cumulative_dict):
     cols = [
@@ -113,7 +111,6 @@ def plot_overview_prices(prices_dict):
     plt.tight_layout()
     st.pyplot(fig)
 
-
 def plot_normalized_performance(cum_dict):
     fig, ax = plt.subplots(figsize=(8, 4))
     for name, cum in cum_dict.items():
@@ -124,7 +121,6 @@ def plot_normalized_performance(cum_dict):
     ax.legend(fontsize=8)
     plt.tight_layout()
     st.pyplot(fig)
-
 
 def plot_individual_charts(prices_dict, cum_dict):
     for name in prices_dict:
@@ -161,11 +157,11 @@ def plot_individual_charts(prices_dict, cum_dict):
 def analyze_correlations(returns_dict):
     df = pd.DataFrame({name: to_1d_series(ret) for name, ret in returns_dict.items()})
     fig, ax = plt.subplots(figsize=(6, 3))
-    sns.heatmap(df.corr(), annot=True, fmt='.2f', cmap='coolwarm', center=0, linewidths=0.5, annot_kws={'size':5}, ax=ax)
+    sns.heatmap(df.corr(), annot=True, fmt='.2f', cmap='coolwarm', center=0, linewidths=0.5,
+                annot_kws={'size':5}, ax=ax)
     ax.set_title("Korrelationsmatrix")
     plt.tight_layout()
     st.pyplot(fig)
-
 
 def analyze_rolling_performance(returns_dict, window=126):
     df = pd.DataFrame({name: to_1d_series(ret) for name, ret in returns_dict.items()})
@@ -264,16 +260,24 @@ def main():
     # Tab 4: Composite Index
     with tabs[4]:
         st.subheader("🔀 Composite Index aus gewählten Assets")
-        dfR = pd.DataFrame(returns)
+        # Filter für gültige Returns
+        valid_returns = {t: r for t, r in returns.items() if isinstance(r, pd.Series) and len(r) > 1}
+        if len(valid_returns) < 2:
+            st.info("Bitte mindestens zwei Assets für den Composite Index laden.")
+            return
+        dfR = pd.DataFrame(valid_returns)
+
         def neg_sh(w):
             ret = (dfR.mean() * w).sum() * 252
             vol = np.sqrt(w.T @ (dfR.cov()*252) @ w)
             return -(ret - RISK_FREE_RATE) / vol if vol>0 else np.nan
+
         cons = ({'type':'eq','fun':lambda w: w.sum()-1},)
         bnds = [(0,1)]*dfR.shape[1]
         x0 = np.repeat(1/dfR.shape[1], dfR.shape[1])
         sol = opt.minimize(neg_sh, x0, method='SLSQP', bounds=bnds, constraints=cons)
         weights = sol.x if sol.success else x0
+
         cols = st.columns(dfR.shape[1])
         rem = 100
         ws = []
@@ -285,10 +289,12 @@ def main():
             else:
                 cols[i].number_input(asset, min_value=0, max_value=100, value=rem, disabled=True)
                 ws.append(rem)
+
         w_arr = np.array(ws)/100
         st.markdown(f"**Summe der Gewichte:** {sum(ws)}%")
         cret = (dfR * w_arr).sum(axis=1)
         ccum = (1+cret).cumprod()
+
         plot_overview_prices({**prices, 'Composite': ccum * prices[list(prices.keys())[0]].iloc[0]})
         plot_normalized_performance({**cums, 'Composite': ccum})
         df_comp = calculate_metrics({**returns, 'Composite': cret}, {**cums, 'Composite': ccum})
