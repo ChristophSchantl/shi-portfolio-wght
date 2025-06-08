@@ -160,7 +160,12 @@ def plot_individual_charts(price_dict, cum_dict):
         axes[0].set_title(f"{name} Preisverlauf")
         axes[0].set_ylabel("Preis")
 
-        axes[1].fill_between(drawdown_final.index, drawdown_final.values, 0, alpha=0.3)
+        axes[1].fill_between(
+            drawdown_final.index,
+            drawdown_final.values,
+            np.zeros_like(drawdown_final.values),
+            alpha=0.3
+        )
         axes[1].plot(drawdown_final.index, drawdown_final.values, linewidth=0.8)
         axes[1].set_title(f"{name} Drawdown")
         axes[1].set_ylabel("Drawdown")
