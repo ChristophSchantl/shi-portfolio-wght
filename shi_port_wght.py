@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import yfinance as yf
 import warnings
 import seaborn as sns
+import re
 import scipy.optimize as opt
 from datetime import datetime, timedelta
 
@@ -475,35 +476,38 @@ def main():
                 set_opt_weights = True
                 # Alle Slider auf optimale Werte setzen
                 for i in range(num_assets - 1):
-                    st.session_state[f"weight_{asset_names[i]}_slider"] = int(opt_weights_percent[i])
+                    st.session_state[f"weight_{i}_{re.sub(r'\\W+', '_', asset_names[i])}_slider"] = int(opt_weights_percent[i])
                 st.session_state["set_opt_weights"] = False  # Flag zurücksetzen nach setzen
                 st.rerun()
-    
+            
             sliders = []
             cols = st.columns(num_assets)
             rest = 100
+            
             for i in range(num_assets - 1):
-                slider_key = f"weight_{asset_names[i]}_slider"
+                # Bereinigten, eindeutigen Key erzeugen
+                safe_name = re.sub(r'\W+', '_', asset_names[i])
+                slider_key = f"weight_{i}_{safe_name}_slider"
+            
                 max_value = max(0, rest)
                 min_value = 0
-    
+            
                 # Wert aus Session State oder von optimalen Gewichten
                 if slider_key not in st.session_state:
                     value = int(opt_weights_percent[i])
                 else:
                     value = st.session_state[slider_key]
-    
+            
                 # Immer im gültigen Bereich halten!
-                if value > max_value:
-                    value = max_value
-                if value < min_value:
-                    value = min_value
-    
-                st.session_state[slider_key] = value  # Explizit synchronisieren
-    
+                value = max(min_value, min(value, max_value))
+            
+                # Session State synchronisieren
+                st.session_state[slider_key] = value
+            
+                # Slider rendern
                 sliders.append(
                     cols[i].slider(
-                        f"{asset_names[i]}",
+                        label=asset_names[i],
                         min_value=min_value,
                         max_value=max_value,
                         value=value,
@@ -511,15 +515,16 @@ def main():
                         key=slider_key,
                     )
                 )
-                rest -= value
-    
+            
+                rest -= sliders[-1]
+            
             # Der letzte Wert: exakt auf 100%!
             last_weight = max(0, 100 - sum(sliders))
             sliders.append(last_weight)
-            last_key = f"weight_{asset_names[-1]}_auto"
-            # NICHT im Session State setzen, damit kein Warning kommt!
+            last_key = f"weight_{num_assets-1}_{re.sub(r'\\W+', '_', asset_names[-1])}_auto"
+            
             cols[-1].number_input(
-                f"{asset_names[-1]} (auto)",
+                label=f"{asset_names[-1]} (auto)",
                 min_value=0,
                 max_value=100,
                 value=last_weight,
@@ -527,10 +532,10 @@ def main():
                 key=last_key,
                 disabled=True
             )
-    
+            
             weights = sliders
             total_weight = sum(weights)
-    
+            
             # --- 4. Summe der Gewichte anzeigen ---
             st.markdown(
                 f"<div style='margin-top:10px;margin-bottom:4px;font-size:1.15em;'><b>Summe der Gewichte: "
