@@ -62,29 +62,35 @@ def tail_ratio(returns):
 def calculate_metrics(returns_dict, cumulative_dict):
     metrics = pd.DataFrame()
     for name in returns_dict:
+        # Returns als Serie
         ret = to_1d_series(returns_dict[name])
+        # Cumulative als Serie
         cum = cumulative_dict[name]
+        if isinstance(cum, pd.DataFrame):
+            cum = cum.iloc[:, 0]
+        cum = pd.to_numeric(cum, errors='coerce').dropna()
         if ret.empty or cum.empty:
             continue
         days = (cum.index[-1] - cum.index[0]).days
         total_ret = cum.iloc[-1] / cum.iloc[0] - 1
-        annual_ret = (1 + total_ret)**(365/days) - 1 if days>0 else np.nan
-        annual_vol = ret.std()*np.sqrt(252)
-        sharpe = (annual_ret - RISK_FREE_RATE)/annual_vol if annual_vol>0 else np.nan
+        annual_ret = (1 + total_ret)**(365/days) - 1 if days > 0 else np.nan
+        annual_vol = ret.std() * np.sqrt(252)
+        sharpe = (annual_ret - RISK_FREE_RATE) / annual_vol if annual_vol > 0 else np.nan
         sortino = sortino_ratio(ret)
-        drawdowns = cum/cum.cummax() - 1
+        # Drawdowns
+        drawdowns = cum / cum.cummax() - 1
         mdd = drawdowns.min() if not drawdowns.empty else np.nan
-        calmar = annual_ret/abs(mdd) if mdd<0 else np.nan
+        calmar = (annual_ret / abs(mdd)) if (pd.api.types.is_scalar(mdd) and mdd < 0) else np.nan
         var_95 = ret.quantile(0.05)
-        cvar_95 = ret[ret<=var_95].mean()
+        cvar_95 = ret[ret <= var_95].mean()
         omega = omega_ratio(ret)
         tail = tail_ratio(ret)
-        win_rate = (ret>0).mean()
-        avg_win = ret[ret>0].mean()
-        avg_loss = ret[ret<0].mean()
-        profit_factor = -avg_win/avg_loss if avg_loss<0 else np.nan
-        monthly_ret = ret.resample('M').apply(lambda x: (1+x).prod()-1)
-        positive_months = (monthly_ret>0).mean()
+        win_rate = (ret > 0).mean()
+        avg_win = ret[ret > 0].mean()
+        avg_loss = ret[ret < 0].mean()
+        profit_factor = -avg_win / avg_loss if avg_loss < 0 else np.nan
+        monthly_ret = ret.resample('M').apply(lambda x: (1 + x).prod() - 1)
+        positive_months = (monthly_ret > 0).mean()
         metrics.loc[name] = [
             total_ret, annual_ret, annual_vol, sharpe, sortino,
             mdd, calmar, var_95, cvar_95, omega, tail,
