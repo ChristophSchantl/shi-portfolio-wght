@@ -245,18 +245,35 @@ def main():
 
 
     
-    # --- Sidebar: Zeitraum & Ticker ---
+    # --- Sidebar: Zeitraum & Ticker-Auswahl ---
     with st.sidebar:
         st.header("Datenquellen auswählen")
         start = st.date_input("Startdatum", value=datetime(2023, 1, 1))
-        end   = st.date_input("Enddatum",  value=datetime.today())
+        end = st.date_input("Enddatum", value=datetime.today())
     
-    # --- Feste Yahoo Finance-Ticker ---
-    tickers = ["QBTS", "VOW3.DE", "INTC", "BIDU", "EL", "TCEHY", "LUMN", "PNGAY", "PDD", "BABA"]
+        # Standard-Ticker
+        default_tickers = ["QBTS", "VOW3.DE", "INTC", "BIDU", "EL", "TCEHY", "LUMN", "PNGAY", "PDD", "BABA"]
     
-    # --- Daten laden ---
-    returns_dict, cumulative_dict = {}, {}
+        st.markdown("**Zusätzliche Yahoo Finance Ticker eingeben (durch Komma, Zeile oder Semikolon getrennt):**")
+        tickers_input = st.text_area(
+            "Zusätzliche Ticker",
+            value="",
+            placeholder="z.B. AAPL, MSFT, GOOG"
+        )
     
+        additional_tickers = []
+        for line in tickers_input.splitlines():
+            additional_tickers += [
+                t.strip()
+                for t in line.replace(";", ",").split(",")
+                if t.strip()
+            ]
+    
+        # Finaler Ticker-Set: Standard + Eingaben
+        tickers = list(set(default_tickers + additional_tickers))
+        st.write("Verarbeitete Ticker:", tickers)
+    
+    # --- Hilfsfunktion zum Laden von Yahoo-Daten ---
     def load_returns_from_yahoo(ticker, start, end):
         df = yf.download(ticker, start=start, end=end)
         df = df[["Close"]].dropna()
@@ -264,7 +281,9 @@ def main():
         df["Cumulative"] = (1 + df["Return"]).cumprod()
         return df["Return"], df["Cumulative"]
     
-    # --- Yahoo Finance-Daten abrufen ---
+    # --- Daten sammeln ---
+    returns_dict, cumulative_dict = {}, {}
+    
     for ticker in tickers:
         try:
             info = yf.Ticker(ticker).info
@@ -283,11 +302,9 @@ def main():
         all_indexes = [set(r.index) for r in returns_dict.values() if len(r) > 0]
         if all_indexes:
             common_index = sorted(set.intersection(*all_indexes))
-        else:
-            common_index = []
-        for name in returns_dict:
-            returns_dict[name] = returns_dict[name].loc[common_index]
-            cumulative_dict[name] = cumulative_dict[name].loc[common_index]
+            for name in returns_dict:
+                returns_dict[name] = returns_dict[name].loc[common_index]
+                cumulative_dict[name] = cumulative_dict[name].loc[common_index]
 
     # --- Tabs ---
     tabs = st.tabs([
