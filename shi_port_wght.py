@@ -60,6 +60,10 @@ def tail_ratio(returns):
         return np.nan
 
 def calculate_metrics(returns_dict, cumulative_dict):
+    """
+    Berechnet eine Reihe von Risikokennzahlen pro Asset.
+    Fehler bei einzelnen Assets werden geloggt und übersprungen.
+    """
     col_names = [
         'Total Return','Annual Return','Annual Volatility','Sharpe Ratio','Sortino Ratio',
         'Max Drawdown','Calmar Ratio','VaR (95%)','CVaR (95%)','Omega Ratio','Tail Ratio',
@@ -67,38 +71,43 @@ def calculate_metrics(returns_dict, cumulative_dict):
     ]
     metrics = pd.DataFrame(columns=col_names)
     for name in returns_dict:
-        ret = to_1d_series(returns_dict[name])
-        cum = cumulative_dict[name]
-        if isinstance(cum, pd.DataFrame):
-            cum = cum.iloc[:, 0]
-        cum = pd.to_numeric(cum, errors='coerce').dropna()
-        if ret.empty or cum.empty:
+        try:
+            ret = to_1d_series(returns_dict[name])
+            cum = cumulative_dict[name]
+            if isinstance(cum, pd.DataFrame):
+                cum = cum.iloc[:, 0]
+            cum = pd.to_numeric(cum, errors='coerce').dropna()
+            if ret.empty or cum.empty:
+                st.warning(f"Kein gültiger Datensatz für {name}, übersprungen.")
+                continue
+            days = (cum.index[-1] - cum.index[0]).days
+            total_ret = cum.iloc[-1] / cum.iloc[0] - 1
+            annual_ret = (1 + total_ret)**(365/days) - 1 if days > 0 else np.nan
+            annual_vol = ret.std() * np.sqrt(252)
+            sharpe = (annual_ret - RISK_FREE_RATE) / annual_vol if annual_vol > 0 else np.nan
+            sortino = sortino_ratio(ret)
+            drawdowns = cum / cum.cummax() - 1
+            mdd = drawdowns.min() if not drawdowns.empty else np.nan
+            calmar = (annual_ret / abs(mdd)) if (pd.api.types.is_scalar(mdd) and mdd < 0) else np.nan
+            var_95 = ret.quantile(0.05)
+            cvar_95 = ret[ret <= var_95].mean()
+            omega = omega_ratio(ret)
+            tail = tail_ratio(ret)
+            win_rate = (ret > 0).mean()
+            avg_win = ret[ret > 0].mean()
+            avg_loss = ret[ret < 0].mean()
+            profit_factor = -avg_win / avg_loss if avg_loss < 0 else np.nan
+            monthly_ret = ret.resample('M').apply(lambda x: (1 + x).prod() - 1)
+            positive_months = (monthly_ret > 0).mean()
+            metrics.loc[name] = [
+                total_ret, annual_ret, annual_vol, sharpe, sortino,
+                mdd, calmar, var_95, cvar_95, omega, tail,
+                win_rate, avg_win, avg_loss, profit_factor,
+                positive_months
+            ]
+        except Exception as e:
+            st.warning(f"Fehler bei Kennzahlen für {name}: {e}")
             continue
-        days = (cum.index[-1] - cum.index[0]).days
-        total_ret = cum.iloc[-1] / cum.iloc[0] - 1
-        annual_ret = (1 + total_ret)**(365/days) - 1 if days > 0 else np.nan
-        annual_vol = ret.std() * np.sqrt(252)
-        sharpe = (annual_ret - RISK_FREE_RATE) / annual_vol if annual_vol > 0 else np.nan
-        sortino = sortino_ratio(ret)
-        drawdowns = cum / cum.cummax() - 1
-        mdd = drawdowns.min() if not drawdowns.empty else np.nan
-        calmar = (annual_ret / abs(mdd)) if (pd.api.types.is_scalar(mdd) and mdd < 0) else np.nan
-        var_95 = ret.quantile(0.05)
-        cvar_95 = ret[ret <= var_95].mean()
-        omega = omega_ratio(ret)
-        tail = tail_ratio(ret)
-        win_rate = (ret > 0).mean()
-        avg_win = ret[ret > 0].mean()
-        avg_loss = ret[ret < 0].mean()
-        profit_factor = -avg_win / avg_loss if avg_loss < 0 else np.nan
-        monthly_ret = ret.resample('M').apply(lambda x: (1 + x).prod() - 1)
-        positive_months = (monthly_ret > 0).mean()
-        metrics.loc[name] = [
-            total_ret, annual_ret, annual_vol, sharpe, sortino,
-            mdd, calmar, var_95, cvar_95, omega, tail,
-            win_rate, avg_win, avg_loss, profit_factor,
-            positive_months
-        ]
     return metrics
 
 # --- Plotfunktionen für Performance & Drawdowns ---
@@ -128,15 +137,35 @@ def plot_individual_charts(price_dict, cum_dict):
     for name in price_dict:
         price = price_dict[name]
         cum = cum_dict[name]
-        drawdown = cum/cum.cummax() - 1
-        fig, axes = plt.subplots(2,1, figsize=(6,4), sharex=True)
-        axes[0].plot(price.index, price)
+        # Drawdown berechnen
+        drawdown = cum / cum.cummax() - 1
+        # Indexe synchronisieren
+        idx = price.index.intersection(drawdown.index)
+        price_aligned = price.loc[idx].dropna()
+        drawdown_aligned = drawdown.loc[idx].dropna()
+        # Sicherstellen, dass wir Daten haben
+        if price_aligned.empty or drawdown_aligned.empty:
+            st.warning(f"Nicht genügend Daten für Einzelcharts {name}, übersprungen.")
+            continue
+        # Gemeinsamer Index
+        common_idx = price_aligned.index.intersection(drawdown_aligned.index)
+        price_final = price_aligned.loc[common_idx]
+        drawdown_final = drawdown_aligned.loc[common_idx]
+        if len(price_final) != len(drawdown_final):
+            st.warning(f"Datenlängen stimmen nicht überein für {name}, übersprungen.")
+            continue
+        # Plot
+        fig, axes = plt.subplots(2, 1, figsize=(6, 4), sharex=True)
+        axes[0].plot(price_final.index, price_final.values, label=name)
         axes[0].set_title(f"{name} Preisverlauf")
         axes[0].set_ylabel("Preis")
-        axes[1].fill_between(drawdown.index, drawdown, 0, alpha=0.3)
+
+        axes[1].fill_between(drawdown_final.index, drawdown_final.values, 0, alpha=0.3)
+        axes[1].plot(drawdown_final.index, drawdown_final.values, linewidth=0.8)
         axes[1].set_title(f"{name} Drawdown")
         axes[1].set_ylabel("Drawdown")
         axes[1].set_xlabel("Datum")
+
         plt.tight_layout()
         st.pyplot(fig)
 
