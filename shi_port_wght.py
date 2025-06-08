@@ -268,7 +268,7 @@ def main():
     
     # --- Funktion zum Laden von Yahoo-Daten ---
     def load_returns_from_yahoo(ticker, start, end):
-        data = yf.download(ticker, start=start, end=end)["Adj Close"]
+        data = yf.download(ticker, start=start, end=end)["Close"]
         returns = data.pct_change().dropna()
         cumulative = (1 + returns).cumprod()
         return returns, cumulative
