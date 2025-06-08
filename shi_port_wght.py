@@ -192,7 +192,7 @@ def analyze_correlations(returns_dict):
     sns.heatmap(
         corr_matrix,
         annot=True,
-        cmap='coolwarm',
+        cmap='Spectral',
         center=0,
         fmt='.2f',
         linewidths=0.5,
