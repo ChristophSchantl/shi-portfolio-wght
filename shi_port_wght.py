@@ -32,18 +32,16 @@ def to_1d_series(ret):
         ret = ret.iloc[:, 0]
     return pd.to_numeric(ret, errors='coerce').dropna()
 
-def load_returns_from_csv(file):
-    df = pd.read_csv(file, index_col=0, parse_dates=True)
-    close = pd.to_numeric(df['Close'], errors='coerce').ffill().dropna()
-    returns = close.pct_change().dropna()
-    cumulative = (1 + returns).cumprod()
-    return returns, cumulative
 
 def load_returns_from_yahoo(ticker, start, end):
-    df = yf.download(ticker, start=start, end=end+timedelta(days=1), progress=False)['Close'].dropna()
-    returns = df.pct_change().dropna()
-    cumulative = (1 + returns).cumprod()
-    return returns, cumulative
+    df = yf.download(ticker, start=start, end=end)
+    if df.empty or "Close" not in df.columns:
+        raise ValueError("Keine gültigen Daten für Ticker")
+
+    df = df[["Close"]].dropna()
+    df["Return"] = df["Close"].pct_change()
+    df["Cumulative"] = (1 + df["Return"]).cumprod()
+    return df["Return"].dropna(), df["Cumulative"].dropna()
 
 def sortino_ratio(returns, risk_free=0.0, annualization=252):
     downside = returns[returns < risk_free]
