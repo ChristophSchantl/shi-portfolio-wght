@@ -60,11 +60,14 @@ def tail_ratio(returns):
         return np.nan
 
 def calculate_metrics(returns_dict, cumulative_dict):
-    metrics = pd.DataFrame()
+    col_names = [
+        'Total Return','Annual Return','Annual Volatility','Sharpe Ratio','Sortino Ratio',
+        'Max Drawdown','Calmar Ratio','VaR (95%)','CVaR (95%)','Omega Ratio','Tail Ratio',
+        'Win Rate','Avg Win','Avg Loss','Profit Factor','Positive Months'
+    ]
+    metrics = pd.DataFrame(columns=col_names)
     for name in returns_dict:
-        # Returns als Serie
         ret = to_1d_series(returns_dict[name])
-        # Cumulative als Serie
         cum = cumulative_dict[name]
         if isinstance(cum, pd.DataFrame):
             cum = cum.iloc[:, 0]
@@ -77,7 +80,6 @@ def calculate_metrics(returns_dict, cumulative_dict):
         annual_vol = ret.std() * np.sqrt(252)
         sharpe = (annual_ret - RISK_FREE_RATE) / annual_vol if annual_vol > 0 else np.nan
         sortino = sortino_ratio(ret)
-        # Drawdowns
         drawdowns = cum / cum.cummax() - 1
         mdd = drawdowns.min() if not drawdowns.empty else np.nan
         calmar = (annual_ret / abs(mdd)) if (pd.api.types.is_scalar(mdd) and mdd < 0) else np.nan
@@ -97,11 +99,6 @@ def calculate_metrics(returns_dict, cumulative_dict):
             win_rate, avg_win, avg_loss, profit_factor,
             positive_months
         ]
-    metrics.columns = [
-        'Total Return','Annual Return','Annual Volatility','Sharpe Ratio','Sortino Ratio',
-        'Max Drawdown','Calmar Ratio','VaR (95%)','CVaR (95%)','Omega Ratio','Tail Ratio',
-        'Win Rate','Avg Win','Avg Loss','Profit Factor','Positive Months'
-    ]
     return metrics
 
 # --- Plotfunktionen für Performance & Drawdowns ---
