@@ -547,7 +547,7 @@ def main() -> None:
             
             # Portfolio-Metriken anzeigen
             port_stats = compute_metrics(port_ret, port_cum)
-            st.json({
+                        st.json({
                 k: f'{v:.2%}' if isinstance(v, float) and k not in [
                     'Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio',
                     'Omega Ratio', 'Tail Ratio', 'Expectancy'
